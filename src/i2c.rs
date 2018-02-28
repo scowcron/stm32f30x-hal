@@ -1,5 +1,6 @@
 //! Inter-Integrated Circuit (I2C) bus
 
+use core::iter::IntoIterator;
 use cast::u8;
 use stm32f30x::{I2C1, I2C2};
 
@@ -7,7 +8,7 @@ use gpio::gpioa::{PA10, PA9};
 use gpio::gpiob::{PB6, PB7, PB8, PB9};
 use gpio::gpiof::{PF0, PF1, PF6};
 use gpio::AF4;
-use hal::blocking::i2c::{Write, WriteRead};
+use hal::blocking::i2c::{Write, WriteIter, WriteRead};
 use rcc::{APB1, Clocks};
 use time::Hertz;
 
@@ -215,6 +216,45 @@ macro_rules! hal {
                     Ok(())
                 }
             }
+
+            impl<PINS> WriteIter for I2c<$I2CX, PINS> {
+                type Error = Error;
+
+                fn write_iter<'a, WI>(&mut self, addr: u8, iter: WI) -> Result<(), Error>
+                    where WI: IntoIterator<Item = &'a u8>
+                {
+                    // START and prepare to send `bytes`
+                    self.i2c.cr2.write(|w| {
+                        w.sadd1()
+                            .bits(addr)
+                            .rd_wrn()
+                            .clear_bit()
+                            .nbytes()
+                            .bits(1)
+                            .start()
+                            .set_bit()
+                    });
+
+                    for byte in iter {
+                        self.i2c.cr2.modify(|_, w| w.nbytes().bits(1));
+
+                        // Wait until we are allowed to send data (START has been ACKed or last byte
+                        // when through)
+                        busy_wait!(self.i2c, txis);
+
+                        // put byte on the wire
+                        self.i2c.txdr.write(|w| w.txdata().bits(*byte));
+                    }
+
+                    // Wait until the last transmission is finished ???
+                    // busy_wait!(self.i2c, busy);
+
+                    self.i2c.cr2.modify(|_, w| w.stop().set_bit());
+
+                    Ok(())
+                }
+            }
+
 
             impl<PINS> WriteRead for I2c<$I2CX, PINS> {
                 type Error = Error;
