@@ -231,6 +231,8 @@ macro_rules! hal {
                             .clear_bit()
                             .nbytes()
                             .bits(1)
+                            .reload()
+                            .set_bit()
                             .start()
                             .set_bit()
                     });
@@ -249,7 +251,12 @@ macro_rules! hal {
                     // Wait until the last transmission is finished ???
                     // busy_wait!(self.i2c, busy);
 
-                    self.i2c.cr2.modify(|_, w| w.stop().set_bit());
+                    self.i2c.cr2.modify(|_, w| {
+                        w.reload()
+                            .clear_bit()
+                            .stop()
+                            .set_bit()
+                    });
 
                     Ok(())
                 }
