@@ -223,6 +223,13 @@ macro_rules! hal {
                 fn write_iter<'a, WI>(&mut self, addr: u8, iter: WI) -> Result<(), Error>
                     where WI: IntoIterator<Item = &'a u8>
                 {
+                    let mut piter = iter.peekable();
+
+                    if let None = piter.peek() {
+                        // XXX send address and nothing else?
+                        return Ok(());
+                    }
+
                     // START and prepare to send `bytes`
                     self.i2c.cr2.write(|w| {
                         w.sadd1()
@@ -237,26 +244,34 @@ macro_rules! hal {
                             .set_bit()
                     });
 
-                    for byte in iter {
-                        self.i2c.cr2.modify(|_, w| w.nbytes().bits(1));
+                    // First byte: wait until ready for data and send it.
+                    busy_wait!(self.i2c, txis);
+                    self.i2c.txdr.write(|w| w.txdata().bits(*piter.next().unwrap());
 
-                        // Wait until we are allowed to send data (START has been ACKed or last byte
-                        // when through)
+                    for byte in piter {
+                        // wait until ready to update NBYTES. just write the old value
+                        // since we're always going to want to send 1 byte
+                        busy_wait!(self.i2c, tcr);
+                        self.i2c.cr2.modify(|_, w| w);
+
+                        // Wait until peripheral ready for data.
                         busy_wait!(self.i2c, txis);
-
-                        // put byte on the wire
                         self.i2c.txdr.write(|w| w.txdata().bits(*byte));
                     }
 
-                    // Wait until the last transmission is finished ???
-                    // busy_wait!(self.i2c, busy);
-
+                    // Mark no more data and stop
+                    busy_wait!(self.i2c, tcr);
                     self.i2c.cr2.modify(|_, w| {
                         w.reload()
                             .clear_bit()
+                            .nbytes()
+                            .bits(0)
                             .stop()
                             .set_bit()
                     });
+
+                    // Wait until the last transmission is finished ??
+                    // busy_wait!(self.i2c, busy);
 
                     Ok(())
                 }
